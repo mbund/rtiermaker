@@ -7,64 +7,85 @@
       url = "github:edolstra/flake-compat";
       flake = false;
     };
+    pre-commit-hooks = {
+      url = "github:cachix/pre-commit-hooks.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-utils.follows = "utils";
+    };
   };
 
-  outputs = { self, nixpkgs, utils, naersk, ... }:
-    utils.lib.eachDefaultSystem
-      (system:
-        let
-          name = "rtiermaker";
-          pkgs = import nixpkgs { inherit system; };
-          naersk-lib = naersk.lib."${system}";
-        in
-        rec {
-          packages.${name} = naersk-lib.buildPackage {
-            pname = "${name}";
-            root = ./.;
-            copyLibs = true;
-            buildInputs = with pkgs; [
-              cairo
-              gdk-pixbuf
-              gobject-introspection
-              graphene
-              gtk4
-              gtksourceview5
-              libadwaita
-              pango
-              pkgconfig
-              wrapGAppsHook
-            ];
-          };
+  outputs = {
+    nixpkgs,
+    utils,
+    naersk,
+    pre-commit-hooks,
+    ...
+  }:
+    utils.lib.eachDefaultSystem (
+      system: let
+        name = "rtiermaker";
+        pkgs = import nixpkgs {
+          inherit system;
+        };
+        naersk-lib = naersk.lib."${system}";
+        deps = with pkgs; [
+          cairo
+          gdk-pixbuf
+          gobject-introspection
+          graphene
+          gtk4
+          gtksourceview5
+          libadwaita
+          pango
+          pkgconfig
+          wrapGAppsHook
+        ];
+      in rec {
+        packages.${name} = naersk-lib.buildPackage {
+          pname = "${name}";
+          root = ./.;
+          copyLibs = true;
+          buildInputs = deps;
+        };
 
-          defaultPackage = packages.${name};
-          packages.default = packages.${name};
+        defaultPackage = packages.${name};
+        packages.default = packages.${name};
 
-          apps.${name} = utils.lib.mkApp {
-            inherit name;
-            drv = packages.${name};
-          };
-          defaultApp = apps.${name};
-          apps.default = apps.${name};
+        apps.${name} = utils.lib.mkApp {
+          inherit name;
+          drv = packages.${name};
+        };
+        defaultApp = apps.${name};
+        apps.default = apps.${name};
 
-          devShells = {
-            default = pkgs.mkShell {
-              nativeBuildInputs =
-                with pkgs; [
-                  rustc
-                  cargo
-                  cairo
-                  gdk-pixbuf
-                  gobject-introspection
-                  graphene
-                  gtk4
-                  gtksourceview5
-                  libadwaita
-                  pango
-                  pkgconfig
-                  wrapGAppsHook
-                ];
-            };
+        checks.pre-commit-check = pre-commit-hooks.lib.${system}.run {
+          src = nixpkgs.lib.cleanSource ../.;
+          hooks = {
+            nix-linter.enable = true;
+            alejandra.enable = true;
+            statix.enable = true;
+
+            rustfmt.enable = true;
+            clippy.enable = true;
           };
-        }
-      );
+        };
+
+        devShells.default = pkgs.mkShell {
+          name = "${name}-devshell";
+          packages = with pkgs;
+            [
+              rustc
+              cargo
+              clippy
+              rustfmt
+              rust-analyzer
+              alejandra
+            ]
+            ++ deps;
+          shellHook = ''
+            ${checks.pre-commit-check.shellHook}
+          '';
+        };
+      }
+    );
 }
